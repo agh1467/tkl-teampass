@@ -1,0 +1,131 @@
+#!/bin/bash -ex
+
+ADMIN_NAME=admin
+ADMIN_PASS=turnkey
+ADMIN_MAIL=admin@example.com
+
+SRC=/usr/local/src
+WEBROOT=/var/www
+APP=teampass
+APP_URL_PATH="http://127.0.0.1/${APP}"
+rm -rf "$WEBROOT/$APP"
+
+# get the version, and unpack
+ZIP_ROOT_DIR=$(unzip -l $SRC/*.zip|grep -E '\/$'|head -1|cut -c 31- |sed 's/\/$//')
+unzip $SRC/*.zip -d "$WEBROOT"
+mv "$WEBROOT/$ZIP_ROOT_DIR" "$WEBROOT/$APP"
+rm $SRC/*.zip
+
+# set permissions
+## THESE PERMISSIONS NEED HELP!
+chown -R root:www-data "$WEBROOT/$APP"
+find "${WEBROOT}/${APP}" -type d -exec chmod 770 {} \;
+find "${WEBROOT}/${APP}" -type f -exec chmod 660 {} \;
+
+# Make the PHP salt key, place it, and set perms/ownership
+SK_PATH=/etc/php5/saltKey
+mkdir "${SK_PATH}"
+PHP_SK=$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+echo ${PHP_SK} > "${SK_PATH}/sk.php"
+chown -R root:www-data "${SK_PATH}"
+chmod 770 "${SK_PATH}"
+chmod 640 "${SK_PATH}/sk.php"
+
+# configure apache
+a2dissite default
+a2ensite ${APP}
+a2enmod rewrite
+/etc/init.d/apache2 reload
+
+# start services
+/etc/init.d/mysql start
+/etc/init.d/apache2 start
+
+netstat -lnop
+
+# Set database vars
+DB_NAME=${APP}
+DB_USER=${APP}_root
+DB_PASS=$(mcookie)
+DB_HOSTNAME=localhost
+
+# setup the database
+MYSQL_BATCH="mysql --user=root --password=$MYSQL_PASS --batch"
+MYSQL_ADMIN="mysqladmin --user=root --password=$MYSQL_PASS"
+
+$MYSQL_ADMIN create $DB_NAME
+$MYSQL_BATCH --execute "grant all privileges on $DB_NAME.* to $DB_USER@localhost identified by '$DB_PASS'; flush privileges;"
+
+# curl based install
+# URL="http://127.0.0.1/install.php?locale=en&"
+URL_PHP="${APP_URL_PATH}/install/install.php"
+URL_AJAX="${APP_URL_PATH}/install/install_ajax.php"
+CURL="curl -c /tmp/cookie -b /tmp/cookie"
+
+# Press Next on landing page
+# POST /teampass/install/install.php step=1&menu_action=
+$CURL "${URL_PHP}" --data "step=1&menu_action="
+
+# Press Launch on Step 1
+# POST /teampass/install/install_ajax.php type=step1&abspath=/var/www/teampass
+# Need to confirm "Elements are OK." appears on the page.
+$CURL "${URL_AJAX}" --data "type=step1&abspath=${WEBROOT}/${APP}" | grep "Elements are OK."
+
+CURL_APP_PATH=$(echo "$WEBROOT/${APP}" |sed 's/\//%2F/g')
+CURL_APP_URL_PATH=$(echo "${APP_URL_PATH}" |sed 's/\//%2F/g;s/:/%3A/g')
+# Press Next on Step 1
+# POST /teampass/install/install.php step=2&menu_action=action&root_path=%2Fvar%2Fwww%2Fteampass&url_path=http%3A%2F%2F172.16.58.131%2Fteampass
+$CURL "${URL_PHP}" --data "step=2&menu_action=action&root_path=${CURL_APP_PATH}&url_path=${CURL_APP_URL_PATH}"
+
+# Press Launch on Step 2
+# POST /teampass/install/install_ajax.php type=step2&db_host=localhost&db_login=teampass_root&db_password=YQeSU0NDQ0MkdeqYXMXDHlQPWT2FkY8gsV2cBT3oUWlP9CcfafqY2g==&db_bdd=teampass
+# Need to confirm that "Connection is successful" appears on the page.
+
+# Press Next on Step 2
+# POST /teampass/install/install.php step=3&menu_action=action&db_host=localhost&db_bdd=teampass&db_login=teampass_root&db_pw=6e6ce69eedd7b17ee6729defd28de82e&step2=
+$CURL "${URL_PHP}" --data "step=3&menu_action=action&db_host=${DB_HOSTNAME}&db_bdd=${DB_NAME}&db_login=${DB_USER}&db_pw=${DB_PASS}&step2="
+
+# Press Launch on Step 3
+# POST /teampass/install/install_ajax.php type=step3&skPath=/etc/php5/saltKey
+# $CURL "${URL_AJAX}" --data "type=step3&skPath=${SK_PATH}"
+
+CURL_SK_PATH=$(echo ${SK_PATH} |sed 's/\//%2F/g')
+# Press Next on Step 3
+# POST /teampass/install/install.php step=4&menu_action=action&tbl_prefix=teampass_&encrypt_key=QBRLhmX3JxexqXbFHt5CR35s4VJK&sk_path=%2Fetc%2Fphp5%2FsaltKey&smtp_server=smtp.my_domain.com&smtp_auth=false&smtp_auth_username=&smtp_auth_password=&smtp_port=25&email_from=&email_from_name=
+$CURL "${URL_PHP}" --data "step=4&menu_action=action&tbl_prefix=teampass_&encrypt_key=${PHP_SK}&sk_path=${CURL_SK_PATH}&smtp_server=smtp.my_domain.com&smtp_auth=false&smtp_auth_username=&smtp_auth_password=&smtp_port=25&email_from=&email_from_name="
+
+# Press Launch on Step 4
+# POST /teampass/install/install_ajax.php type=step4
+# Need to confirm that "dataBase has been populated" appears on the page.
+$CURL "${URL_AJAX}" --data "type=step4" | grep "dataBase has been populated" || exit 1
+
+# Press Next on Step 4
+# POST /teampass/install/install.php step=5&menu_action=action
+$CURL "${URL_PHP}" --data "step=5&menu_action=action"
+
+# Press Launch on Step 5
+# POST /teampass/install/install_ajax.php type=step5
+$CURL "${URL_AJAX}" --data "type=step5"
+
+# Press Next on Step 5
+# Need to confirm "Teampass installation complete" appears on the page.
+# POST /teampass/install/install.php step=6&menu_action=action
+$CURL "${URL_PHP}" --data "step=6&menu_action=action" | grep "Teampass installation complete" || exit 1
+
+rm -f /tmp/cookie
+rm "${WEBROOT}/${APP}"/install/install*
+chmod 660 "${WEBROOT}/${APP}/includes/settings.php"
+
+# tweak footer
+#HTML="<div id='turnkey-credit' style='padding-top:20px;text-align:center;font-size:11px;color:#6AB0C5;'><a style='color:#6AB0C5;' href='http://www.turnkeylinux.org/collabtive'>Collabtive Appliance</a> - Powered by <a style='color:#6AB0C5;' href='http://www.turnkeylinux.org'>TurnKey Linux</a></div>"
+
+#sed -i "s|</body>|$HTML\n</body>|" $WEBROOT/templates/winter/footer.tpl
+#sed -i "s|</body>|$HTML\n</body>|" $WEBROOT/templates/standard/footer.tpl
+
+#sed -i "s|{/if}|{/if}\n$HTML|" $WEBROOT/templates/winter/login.tpl
+#sed -i "s|{/if}|{/if}\n$HTML|" $WEBROOT/templates/standard/login.tpl
+
+# stop services
+/etc/init.d/mysql stop
+/etc/init.d/apache2 stop
+

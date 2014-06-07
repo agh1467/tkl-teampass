@@ -1,0 +1,7 @@
+turnkey-teampass-0.1 (1) turnkey; urgency=low
+
+  * Upstream source component versions:
+
+    teampass      2.1.20
+
+ -- Andrew Bloxom <agh1467@rcpt.at>

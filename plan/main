@@ -1,0 +1,9 @@
+#include <turnkey/base>
+#include <turnkey/lamp>
+
+php5-mysql
+php5-mcrypt
+php5-json
+
+unzip
+
