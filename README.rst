@@ -24,9 +24,10 @@ Credentials *(passwords set at first boot)*
 -------------------------------------------
 
 - Webmin, SSH, MySQL, phpMyAdmin: username **root**
-- TeamPass: username **admin**
+- TeamPass: username **admin** password **admin**
 
 
 .. _TeamPass: http://teampass.net/
 .. _TurnKey Core: http://www.turnkeylinux.org/core
+.. _TurnKey LAMP: http://www.turnkeylinux.org/lampstack
 .. _PHPMyAdmin: http://www.phpmyadmin.net
